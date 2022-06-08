@@ -7,8 +7,6 @@ scipy>=1.7.1
 geomloss==0.2.4
 pygame==2.1.0
 gym==0.19.0
-pyglet==1.5.21
-Box2D==2.3.10
 gurobipy==9.5.0
 cyipopt==1.1.0
 gpytorch==1.6.0
