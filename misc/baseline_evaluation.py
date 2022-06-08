@@ -6,7 +6,7 @@ from misc.generate_hp_search_scripts import alg_params
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base_log_dir", type=str, default="cluster_logs")
-    parser.add_argument("--learner", type=str, default="sac", choices=["ppo", "sac", "racing_ppo"])
+    parser.add_argument("--learner", type=str, default="sac", choices=["ppo", "sac"])
     parser.add_argument("--env", type=str, default="maze", choices=["point_mass_2d", "maze"])
 
     args = parser.parse_args()
