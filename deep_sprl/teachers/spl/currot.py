@@ -8,20 +8,19 @@ from scipy.optimize import linear_sum_assignment
 from deep_sprl.teachers.util import NadarayaWatson
 from deep_sprl.teachers.spl.sliced_wasserstein import sliced_wasserstein
 from deep_sprl.teachers.abstract_teacher import AbstractTeacher
-from deep_sprl.teachers.spl.wasserstein_barycenters import RandomizedIndividualBarycenterCurriculum
+from deep_sprl.teachers.spl.wasserstein_interpolation import SamplingWassersteinInterpolation
 
 
-class ContinuousBarycenterCurriculum(AbstractTeacher):
+class CurrOT(AbstractTeacher):
 
-    def __init__(self, context_bounds, min_ret, max_ret, init_samples, target_sampler, perf_lb, eta,
-                 callback=None, return_transform=None, wait_until_threshold=False):
+    def __init__(self, context_bounds, init_samples, target_sampler, perf_lb, epsilon, callback=None,
+                 wait_until_threshold=False):
         self.context_bounds = context_bounds
         self.threshold_reached = False
         self.wait_until_threshold = wait_until_threshold
-        self.return_transform = return_transform
-        self.teacher = RandomizedIndividualBarycenterCurriculum(init_samples, target_sampler, perf_lb, np.sqrt(eta),
-                                                                self.context_bounds, callback=callback)
-        self.success_buffer = WassersteinSuccessBuffer(perf_lb, init_samples.shape[0], eta,
+        self.teacher = SamplingWassersteinInterpolation(init_samples, target_sampler, perf_lb, np.sqrt(epsilon),
+                                                        self.context_bounds, callback=callback)
+        self.success_buffer = WassersteinSuccessBuffer(perf_lb, init_samples.shape[0], epsilon,
                                                        context_bounds=context_bounds)
         self.fail_context_buffer = []
         self.fail_return_buffer = []
@@ -31,9 +30,6 @@ class ContinuousBarycenterCurriculum(AbstractTeacher):
         self.sampler.update(context, ret)
 
     def update_distribution(self, contexts, returns):
-        if self.return_transform is not None:
-            returns = self.return_transform(returns)
-
         t_up1 = time.time()
         fail_contexts, fail_returns = self.success_buffer.update(contexts, returns,
                                                                  self.teacher.target_sampler(
@@ -52,7 +48,7 @@ class ContinuousBarycenterCurriculum(AbstractTeacher):
         else:
             train_contexts = np.concatenate((np.stack(self.fail_context_buffer, axis=0), success_contexts), axis=0)
             train_returns = np.concatenate((np.stack(self.fail_return_buffer, axis=0), success_returns), axis=0)
-        model = NadarayaWatson(train_contexts, train_returns, 0.3 * self.teacher.eta)
+        model = NadarayaWatson(train_contexts, train_returns, 0.3 * self.teacher.epsilon)
         t_up2 = time.time()
 
         t_mo1 = time.time()
@@ -89,10 +85,10 @@ class ContinuousBarycenterCurriculum(AbstractTeacher):
 
 class AbstractSuccessBuffer(ABC):
 
-    def __init__(self, delta: float, n: int, eta: float, context_bounds: Tuple[np.ndarray, np.ndarray]):
+    def __init__(self, delta: float, n: int, epsilon: float, context_bounds: Tuple[np.ndarray, np.ndarray]):
         context_exts = context_bounds[1] - context_bounds[0]
         self.delta_stds = context_exts / 4
-        self.min_stds = 0.005 * eta * np.ones(len(context_bounds[0]))
+        self.min_stds = 0.005 * epsilon * np.ones(len(context_bounds[0]))
         self.context_bounds = context_bounds
         self.delta = delta
         self.max_size = n
@@ -192,8 +188,8 @@ class AbstractSuccessBuffer(ABC):
 
 class WassersteinSuccessBuffer(AbstractSuccessBuffer):
 
-    def __init__(self, delta: float, n: int, eta: float, context_bounds: Tuple[np.ndarray, np.ndarray]):
-        super().__init__(delta, n, eta, context_bounds)
+    def __init__(self, delta: float, n: int, epsilon: float, context_bounds: Tuple[np.ndarray, np.ndarray]):
+        super().__init__(delta, n, epsilon, context_bounds)
 
     def update_delta_not_reached(self, contexts: np.ndarray, returns: np.ndarray,
                                  current_samples: np.ndarray) -> Tuple[bool, np.ndarray, np.ndarray, List[bool]]:

@@ -1,13 +1,31 @@
-This folder contains the code for running and visualizing the sparse goal reaching and point mass experiments presented in the main paper.
-For the bipedal walker experiment, we provide the wrapper that we used to interface our CRL method to the benchmark. The interface is located at 
-````
-deep_sprl/teachers/spl/wasserstein_teacher_tma.py
-````
-and needs to be integrated into this repository: https://github.com/flowersteam/TeachMyAgent.  
+This folder contains the code accompanying the ICML paper "Curriculum Reinforcement Learning via Constrained Optimal Transport". 
+For re-creating the experiments from the main paper, please switch to the [ICML Branch](https://github.com/psclklnk/currot/tree/icml). 
+The main branch (which you are looking at right now) features an **improved version** of the algorithm which improves 
+the run-time of the optimization. Conceptually, the changes are as follows:
+
+1. We estimate the performance of the learner via **Nadaraya-Watson kernel- instead gaussian process regression**.
+We switched to this method as we realized that the length-scale of the ARD GP tends to shrink to very small values if 
+there are regions in which the value differs a lot. Since the lengthscales of the GP are applied globally, the small 
+lengthscales required to explain regions with a large change in value, can hinder particle movement in regions of the 
+context space in which the agent is already proficient. The Nadaraya-Watson estimator does not face this problem while 
+not requiring critical hyperparameters to be chosen by the user.
+2. We **replaced the GurobiPy and GeomLoss dependencies by using the linear_sum_assignment method from SciPy** to solve the
+assignment problems required for the curriculum generation.
+3. **Instead of optimizing the objective in a gradient-based manner using IPOPT, we solve a more restricted version using
+sampling-based methods.** The more restricted version replaces the constraint on the average particle distance by a constraint
+that enforces the average distance on each particle. This restriction, however, allows to optimize the position of each
+particle fully individually. We do this local optimization by sampling candidates within the allowed distance and 
+selecting the candidate which is closes to the target position of the particle while fulfilling the performance threshold.
+This decomposition of the objective leads to faster optimization, while the sampling-based optimization avoids pitfalls 
+of local optima in the estimated value function.
+
+As shown, in the plots below, the method in the main branch performs better on the point-mass and the maze environment. We did not re-compute the experiments for the TeachMyAgent benchmark, as it is quite compute intensive.
 
 For the sparse goal reaching and point mass environment, we used Python 3.8 to run the experiments. The required dependencies are listed in the **requirements.txt**
 file and can be installed via
 ```shell script
+cd nadaraya-watson
+pip install .
 pip install -r requirements.txt
 ```
 The experiments can be run via the **run.py** scripts. For convenience, we have created the 

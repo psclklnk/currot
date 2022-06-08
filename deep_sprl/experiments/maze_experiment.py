@@ -5,7 +5,7 @@ import numpy as np
 from deep_sprl.experiments.abstract_experiment import AbstractExperiment, Learner
 from deep_sprl.teachers.goal_gan import GoalGAN, GoalGANWrapper
 from deep_sprl.teachers.alp_gmm import ALPGMM, ALPGMMWrapper
-from deep_sprl.teachers.spl import SelfPacedTeacherV2, SelfPacedWrapper, ContinuousBarycenterCurriculum
+from deep_sprl.teachers.spl import SelfPacedTeacherV2, SelfPacedWrapper, CurrOT
 from deep_sprl.teachers.dummy_teachers import UniformSampler
 from deep_sprl.teachers.abstract_teacher import BaseWrapper
 from deep_sprl.teachers.acl import ACL, ACLWrapper
@@ -42,9 +42,6 @@ class MazeExperiment(AbstractExperiment):
 
     LOWER_CONTEXT_BOUNDS = np.array([-9., -9., 0.05])
     UPPER_CONTEXT_BOUNDS = np.array([9., 9., 18.])
-
-    MIN_RET = 0.
-    MAX_RET = 1.
 
     DISCOUNT_FACTOR = 0.995
 
@@ -180,9 +177,7 @@ class MazeExperiment(AbstractExperiment):
                                       std_lower_bound=None, kl_threshold=None)
         elif self.curriculum.wasserstein():
             init_samples = np.random.uniform(np.array([-9., -9., 18.]), np.array([9., 9., 18.]), size=(500, 3))
-            return ContinuousBarycenterCurriculum(bounds, self.MIN_RET, self.MAX_RET, init_samples, self.target_sampler,
-                                                  self.DELTA, self.METRIC_EPS,
-                                                  return_transform=lambda x: x - self.MIN_RET)
+            return CurrOT(bounds, init_samples, self.target_sampler, self.DELTA, self.METRIC_EPS)
         else:
             raise RuntimeError('Invalid self-paced curriculum type')
 

@@ -5,15 +5,15 @@ from scipy.optimize import linear_sum_assignment
 from deep_sprl.teachers.spl.sliced_wasserstein import sliced_wasserstein
 
 
-class RandomizedIndividualBarycenterCurriculum:
+class SamplingWassersteinInterpolation:
 
-    def __init__(self, init_samples, target_sampler, perf_lb, eta, bounds, callback=None):
+    def __init__(self, init_samples, target_sampler, perf_lb, epsilon, bounds, callback=None):
         self.current_samples = init_samples
         self.n_samples, self.dim = self.current_samples.shape
         self.target_sampler = target_sampler
         self.bounds = bounds
         self.perf_lb = perf_lb
-        self.eta = eta
+        self.epsilon = epsilon
         self.callback = callback
 
     def sample_ball(self, targets, samples=None, half_ball=None, n=100):
@@ -37,8 +37,8 @@ class RandomizedIndividualBarycenterCurriculum:
         if half_ball is not None:
             projected_noise[~half_ball] = noise
 
-        scales = np.minimum(self.eta, np.sqrt(dir_norms))[:, None, None]
-        return np.squeeze(np.clip(samples[..., None, :] + scales * projected_noise, self.bounds[0], self.bounds[1]))
+        scales = np.minimum(self.epsilon, np.sqrt(dir_norms))[:, None, None]
+        return np.clip(samples[..., None, :] + scales * projected_noise, self.bounds[0], self.bounds[1])
 
     @staticmethod
     def visualize_particles(init_samples, particles, performances):
@@ -117,7 +117,7 @@ class RandomizedIndividualBarycenterCurriculum:
 
     def save(self, path):
         with open(os.path.join(path, "teacher.pkl"), "wb") as f:
-            pickle.dump((self.current_samples, self.perf_lb, self.eta), f)
+            pickle.dump((self.current_samples, self.perf_lb, self.epsilon), f)
 
     def load(self, path):
         with open(os.path.join(path, "teacher.pkl"), "rb") as f:
@@ -127,4 +127,4 @@ class RandomizedIndividualBarycenterCurriculum:
             self.n_samples = self.current_samples.shape[0]
 
             self.perf_lb = tmp[1]
-            self.eta = tmp[2]
+            self.epsilon = tmp[2]
