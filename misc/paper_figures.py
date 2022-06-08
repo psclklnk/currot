@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import brentq, minimize, NonlinearConstraint
-from deep_sprl.teachers.spl.wasserstein_barycenters import IndividualBarycenterCurriculum
+from deep_sprl.teachers.spl.wasserstein_interpolation import WassersteinInterpolation
 
 FONT_SIZE = 8
 TICK_SIZE = 6
@@ -311,8 +311,8 @@ def wasserstein_plot(path=None):
             cache_path = os.path.join(cache_dir, "interpolants_%.2f.pkl" % delta)
             if not os.path.exists(cache_path):
                 init_samples = np.random.uniform(0., np.max(xs[values >= delta]), n_samples)[:, None]
-                curriculum = IndividualBarycenterCurriculum(init_samples, target_sampler, perf_lb=delta, eta=10.,
-                                                            opt_time=60., opt_tol=1e-6, ws_scaling=0.99, ws_blur=0.01)
+                curriculum = WassersteinInterpolation(init_samples, target_sampler, perf_lb=delta, epsilon=10.,
+                                                      opt_time=60., opt_tol=1e-6, ws_scaling=0.99, ws_blur=0.01)
 
                 curriculum.current_samples = curriculum.current_samples - \
                                              np.random.uniform(0, 5e-3, curriculum.current_samples.shape)

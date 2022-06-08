@@ -6,14 +6,13 @@ from typing import Tuple, Any, List, NoReturn
 from deep_sprl.teachers.util import RewardEstimatorGP
 from deep_sprl.teachers.spl.assignment_solver import AssignmentSolver
 from deep_sprl.teachers.abstract_teacher import AbstractTeacher
-from deep_sprl.teachers.spl.wasserstein_barycenters import IndividualBarycenterCurriculum
+from deep_sprl.teachers.spl.wasserstein_interpolation import WassersteinInterpolation
 
 
-class ContinuousBarycenterCurriculum(AbstractTeacher):
+class CurrOT(AbstractTeacher):
 
-    def __init__(self, context_bounds, min_ret, max_ret, init_samples, target_sampler, perf_lb, eta,
-                 episodes_per_update, callback=None, model=None, return_transform=None, wait_until_threshold=False,
-                 wb_max_reuse=3):
+    def __init__(self, context_bounds, init_samples, target_sampler, perf_lb, epsilon, episodes_per_update,
+                 callback=None, model=None, wait_until_threshold=False, wb_max_reuse=1):
         if model is None:
             self.model = RewardEstimatorGP()
         else:
@@ -22,11 +21,8 @@ class ContinuousBarycenterCurriculum(AbstractTeacher):
         # Create an array if we use the same number of bins per dimension
         self.context_bounds = context_bounds
         self.threshold_reached = not wait_until_threshold
-        self.return_transform = return_transform
-        self.teacher = IndividualBarycenterCurriculum(init_samples, target_sampler, perf_lb, eta, callback=callback)
-        # The delta_stds are meant to cover half of the context space within their 2 std intervals. This should be
-        # enough initial exploration
-        self.success_buffer = WassersteinSuccessBuffer(perf_lb, init_samples.shape[0], episodes_per_update, eta,
+        self.teacher = WassersteinInterpolation(init_samples, target_sampler, perf_lb, epsilon, callback=callback)
+        self.success_buffer = WassersteinSuccessBuffer(perf_lb, init_samples.shape[0], episodes_per_update, epsilon,
                                                        context_bounds=context_bounds, max_reuse=wb_max_reuse)
         self.fail_context_buffer = []
         self.fail_return_buffer = []
@@ -36,9 +32,6 @@ class ContinuousBarycenterCurriculum(AbstractTeacher):
         self.sampler.update(context, ret)
 
     def update_distribution(self, contexts, returns):
-        if self.return_transform is not None:
-            returns = self.return_transform(returns)
-
         fail_contexts, fail_returns = self.success_buffer.update(contexts, returns,
                                                                  self.teacher.target_sampler(
                                                                      self.teacher.current_samples.shape[0]))
@@ -84,10 +77,10 @@ class ContinuousBarycenterCurriculum(AbstractTeacher):
 
 class AbstractSuccessBuffer(ABC):
 
-    def __init__(self, delta: float, n: int, eta: float, context_bounds: Tuple[np.ndarray, np.ndarray]):
+    def __init__(self, delta: float, n: int, epsilon: float, context_bounds: Tuple[np.ndarray, np.ndarray]):
         context_exts = context_bounds[1] - context_bounds[0]
         self.delta_stds = context_exts / 4
-        self.min_stds = 0.005 * eta * np.ones(len(context_bounds[0]))
+        self.min_stds = 0.005 * epsilon * np.ones(len(context_bounds[0]))
         self.context_bounds = context_bounds
         self.delta = delta
         self.max_size = n
@@ -187,9 +180,9 @@ class AbstractSuccessBuffer(ABC):
 
 class WassersteinSuccessBuffer(AbstractSuccessBuffer):
 
-    def __init__(self, delta: float, n: int, ep_per_update: int, eta: float,
+    def __init__(self, delta: float, n: int, ep_per_update: int, epsilon: float,
                  context_bounds: Tuple[np.ndarray, np.ndarray], max_reuse=3):
-        super().__init__(delta, n, eta, context_bounds)
+        super().__init__(delta, n, epsilon, context_bounds)
         self.max_reuse = max_reuse
         self.solver = AssignmentSolver(ep_per_update, n, max_reuse=self.max_reuse, verbose=False)
         self.last_assignments = None

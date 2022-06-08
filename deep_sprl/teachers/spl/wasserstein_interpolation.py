@@ -6,16 +6,16 @@ import cyipopt as ipopt
 from geomloss import SamplesLoss
 
 
-class IndividualBarycenterCurriculum:
+class WassersteinInterpolation:
 
-    def __init__(self, init_samples, target_sampler, perf_lb, eta, callback=None, opt_tol=1e-3, opt_time=2.,
+    def __init__(self, init_samples, target_sampler, perf_lb, epsilon, callback=None, opt_tol=1e-3, opt_time=2.,
                  ws_scaling=0.9, ws_blur=0.01):
         self.current_samples = init_samples
         self.n_samples, self.dim = self.current_samples.shape
         self.target_sampler = target_sampler
 
         self.perf_lb = perf_lb
-        self.eta = eta
+        self.epsilon = epsilon
 
         self.sl = SamplesLoss("sinkhorn", blur=ws_blur, scaling=ws_scaling, backend="tensorized")
         self.callback = callback
@@ -28,7 +28,7 @@ class IndividualBarycenterCurriculum:
         ub = [1.] * self.n_samples
 
         cl = [-np.inf] + [perf_lb] * self.n_samples
-        cu = [eta] + [np.inf] * self.n_samples
+        cu = [epsilon] + [np.inf] * self.n_samples
         self.nlp = ipopt.Problem(n=self.n_samples, m=len(cl), problem_obj=self, lb=lb, ub=ub, cl=cl, cu=cu)
 
         # ... and configure some options of it (e.g. that we do not need to be so perfectly accurate,
@@ -140,7 +140,7 @@ class IndividualBarycenterCurriculum:
 
     def save(self, path):
         with open(os.path.join(path, "teacher.pkl"), "wb") as f:
-            pickle.dump((self.current_samples, self.perf_lb, self.eta), f)
+            pickle.dump((self.current_samples, self.perf_lb, self.epsilon), f)
 
     def load(self, path):
         with open(os.path.join(path, "teacher.pkl"), "rb") as f:
@@ -150,4 +150,4 @@ class IndividualBarycenterCurriculum:
             self.n_samples = self.current_samples.shape[0]
 
             self.perf_lb = tmp[1]
-            self.eta = tmp[2]
+            self.epsilon = tmp[2]

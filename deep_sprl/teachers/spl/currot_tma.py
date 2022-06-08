@@ -1,18 +1,18 @@
 import copy
 import numpy as np
 from TeachMyAgent.teachers.algos.AbstractTeacher import AbstractTeacher
-from .wasserstein_teacher import ContinuousBarycenterCurriculum
+from .currot import CurrOT
 
 
-class TMAContinuousBarycenterCurriculum(AbstractTeacher):
+class TMACurrOT(AbstractTeacher):
 
     def __init__(self, context_lb, context_ub, env_reward_lb, env_reward_ub, perf_lb=180, n_samples=500,
-                 episodes_per_update=50, eta=None, callback=None, seed=None):
+                 episodes_per_update=50, epsilon=None, callback=None, seed=None):
 
         super().__init__(context_lb, context_ub, env_reward_lb, env_reward_ub, seed=seed)
 
-        if eta is None:
-            eta = 0.05 * np.linalg.norm(np.array(context_ub) - np.array(context_lb))
+        if epsilon is None:
+            epsilon = 0.05 * np.linalg.norm(np.array(context_ub) - np.array(context_lb))
 
         if perf_lb is None:
             perf_lb = 0.5 * (env_reward_ub - env_reward_lb) + env_reward_lb
@@ -25,9 +25,8 @@ class TMAContinuousBarycenterCurriculum(AbstractTeacher):
         target_sampler = lambda n: np.random.uniform(context_lb, context_ub, size=(n, len(context_lb)))
         init_samples = np.random.uniform(context_lb, context_ub, size=(n_samples, len(context_lb)))
 
-        self.curriculum = ContinuousBarycenterCurriculum((np.array(context_lb), np.array(context_ub)),
-                                                         env_reward_lb, env_reward_ub, init_samples, target_sampler,
-                                                         perf_lb, eta, episodes_per_update, wb_max_reuse=1)
+        self.curriculum = CurrOT((np.array(context_lb), np.array(context_ub)), init_samples, target_sampler,
+                                 perf_lb, epsilon, episodes_per_update, wb_max_reuse=1)
 
         self.context_buffer = []
         self.return_buffer = []

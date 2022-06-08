@@ -5,7 +5,7 @@ import numpy as np
 from deep_sprl.experiments.abstract_experiment import AbstractExperiment, Learner
 from deep_sprl.teachers.alp_gmm import ALPGMM, ALPGMMWrapper
 from deep_sprl.teachers.goal_gan import GoalGAN, GoalGANWrapper
-from deep_sprl.teachers.spl import SelfPacedTeacherV2, SelfPacedWrapper, ContinuousBarycenterCurriculum
+from deep_sprl.teachers.spl import SelfPacedTeacherV2, SelfPacedWrapper, CurrOT
 from deep_sprl.teachers.dummy_teachers import UniformSampler, DistributionSampler
 from deep_sprl.teachers.abstract_teacher import BaseWrapper
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -24,9 +24,6 @@ def logsumexp(x):
 class PointMass2DExperiment(AbstractExperiment):
     TARGET_MEANS = np.array([[3., 0.5], [-3., 0.5]])
     TARGET_VARIANCES = np.array([np.diag([1e-4, 1e-4]), np.diag([1e-4, 1e-4])])
-
-    MIN_RET = 0.
-    MAX_RET = 10.
 
     LOWER_CONTEXT_BOUNDS = np.array([-4., 0.5])
     UPPER_CONTEXT_BOUNDS = np.array([4., 8.])
@@ -169,8 +166,8 @@ class PointMass2DExperiment(AbstractExperiment):
                                       std_lower_bound=self.STD_LOWER_BOUND.copy(), kl_threshold=self.KL_THRESHOLD)
         else:
             init_samples = np.random.uniform(self.LOWER_CONTEXT_BOUNDS, self.UPPER_CONTEXT_BOUNDS, size=(200, 2))
-            return ContinuousBarycenterCurriculum(bounds, self.MIN_RET, self.MAX_RET, init_samples, self.target_sampler,
-                                                  self.DELTA, self.METRIC_EPS, self.EP_PER_UPDATE)
+            return CurrOT(bounds, init_samples, self.target_sampler, self.DELTA, self.METRIC_EPS, self.EP_PER_UPDATE,
+                          wb_max_reuse=1)
 
     def get_env_name(self):
         return "point_mass_2d"
