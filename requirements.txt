@@ -1,5 +1,4 @@
 torch==1.10.0
-# Install this with conda for the M1 macs and python 3.9 (which is required for gurobipy)
 scikit-learn==1.0.1
 stable-baselines3==1.3.0
 numpy>=1.19.5
@@ -9,7 +8,5 @@ pygame==2.1.0
 gym==0.19.0
 pyglet==1.5.21
 Box2D==2.3.10
-gurobipy==9.5.0
 cyipopt==1.1.0
-mujoco-py>=2.0.2.9
 gpytorch==1.6.0

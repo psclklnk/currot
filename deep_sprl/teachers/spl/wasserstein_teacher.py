@@ -1,33 +1,28 @@
 import os
+import time
 import pickle
 import numpy as np
 from abc import ABC, abstractmethod
 from typing import Tuple, Any, List, NoReturn
-from deep_sprl.teachers.util import RewardEstimatorGP
-from deep_sprl.teachers.spl.assignment_solver import AssignmentSolver
+from scipy.optimize import linear_sum_assignment
+from deep_sprl.teachers.util import NadarayaWatson
+from deep_sprl.teachers.spl.sliced_wasserstein import sliced_wasserstein
 from deep_sprl.teachers.abstract_teacher import AbstractTeacher
-from deep_sprl.teachers.spl.wasserstein_barycenters import IndividualBarycenterCurriculum
+from deep_sprl.teachers.spl.wasserstein_barycenters import RandomizedIndividualBarycenterCurriculum
 
 
 class ContinuousBarycenterCurriculum(AbstractTeacher):
 
     def __init__(self, context_bounds, min_ret, max_ret, init_samples, target_sampler, perf_lb, eta,
-                 episodes_per_update, callback=None, model=None, return_transform=None, wait_until_threshold=False,
-                 wb_max_reuse=3):
-        if model is None:
-            self.model = RewardEstimatorGP()
-        else:
-            self.model = model
-
-        # Create an array if we use the same number of bins per dimension
+                 callback=None, return_transform=None, wait_until_threshold=False):
         self.context_bounds = context_bounds
-        self.threshold_reached = not wait_until_threshold
+        self.threshold_reached = False
+        self.wait_until_threshold = wait_until_threshold
         self.return_transform = return_transform
-        self.teacher = IndividualBarycenterCurriculum(init_samples, target_sampler, perf_lb, eta, callback=callback)
-        # The delta_stds are meant to cover half of the context space within their 2 std intervals. This should be
-        # enough initial exploration
-        self.success_buffer = WassersteinSuccessBuffer(perf_lb, init_samples.shape[0], episodes_per_update, eta,
-                                                       context_bounds=context_bounds, max_reuse=wb_max_reuse)
+        self.teacher = RandomizedIndividualBarycenterCurriculum(init_samples, target_sampler, perf_lb, np.sqrt(eta),
+                                                                self.context_bounds, callback=callback)
+        self.success_buffer = WassersteinSuccessBuffer(perf_lb, init_samples.shape[0], eta,
+                                                       context_bounds=context_bounds)
         self.fail_context_buffer = []
         self.fail_return_buffer = []
         self.sampler = UniformSampler(self.context_bounds)
@@ -39,6 +34,7 @@ class ContinuousBarycenterCurriculum(AbstractTeacher):
         if self.return_transform is not None:
             returns = self.return_transform(returns)
 
+        t_up1 = time.time()
         fail_contexts, fail_returns = self.success_buffer.update(contexts, returns,
                                                                  self.teacher.target_sampler(
                                                                      self.teacher.current_samples.shape[0]))
@@ -56,27 +52,36 @@ class ContinuousBarycenterCurriculum(AbstractTeacher):
         else:
             train_contexts = np.concatenate((np.stack(self.fail_context_buffer, axis=0), success_contexts), axis=0)
             train_returns = np.concatenate((np.stack(self.fail_return_buffer, axis=0), success_returns), axis=0)
-        self.model.update_model(train_contexts, train_returns)
+        model = NadarayaWatson(train_contexts, train_returns, 0.3 * self.teacher.eta)
+        t_up2 = time.time()
 
-        if self.threshold_reached or self.model(self.teacher.current_samples) >= self.teacher.perf_lb:
+        t_mo1 = time.time()
+        avg_perf = np.mean(model.predict_individual(self.teacher.current_samples))
+        if self.threshold_reached or avg_perf >= self.teacher.perf_lb:
             self.threshold_reached = True
-            self.teacher.update_distribution(self.model, self.success_buffer.read_update())
+            self.teacher.update_distribution(model, self.success_buffer.read_update())
         else:
-            print("Not updating sampling distribution, as performance threshold not met: %.3e vs %.3e" % (
-                self.model(self.teacher.current_samples), self.teacher.perf_lb))
+            print("Current performance: %.3e vs %.3e" % (avg_perf, self.teacher.perf_lb))
+            if self.wait_until_threshold:
+                print("Not updating sampling distribution, as performance threshold not met")
+            else:
+                # Which update is better is better?
+                self.teacher.update_distribution(model, self.success_buffer.read_update())
+                # self.teacher.current_samples = self.success_buffer.read_update()
+        t_mo2 = time.time()
+
+        print("Total update took: %.3e (Buffer/Update: %.3e/%.3e)" % (t_mo2 - t_up1, t_up2 - t_up1, t_mo2 - t_mo1))
 
     def sample(self):
         sample = self.sampler(self.teacher.current_samples)
         return np.clip(sample, self.context_bounds[0], self.context_bounds[1])
 
     def save(self, path):
-        self.model.save(os.path.join(path, "teacher_model.pkl"))
         self.teacher.save(path)
         self.success_buffer.save(path)
         self.sampler.save(path)
 
     def load(self, path):
-        self.model.load(os.path.join(path, "teacher_model.pkl"))
         self.teacher.load(path)
         self.success_buffer.load(path)
         self.sampler.load(path)
@@ -187,12 +192,8 @@ class AbstractSuccessBuffer(ABC):
 
 class WassersteinSuccessBuffer(AbstractSuccessBuffer):
 
-    def __init__(self, delta: float, n: int, ep_per_update: int, eta: float,
-                 context_bounds: Tuple[np.ndarray, np.ndarray], max_reuse=3):
+    def __init__(self, delta: float, n: int, eta: float, context_bounds: Tuple[np.ndarray, np.ndarray]):
         super().__init__(delta, n, eta, context_bounds)
-        self.max_reuse = max_reuse
-        self.solver = AssignmentSolver(ep_per_update, n, max_reuse=self.max_reuse, verbose=False)
-        self.last_assignments = None
 
     def update_delta_not_reached(self, contexts: np.ndarray, returns: np.ndarray,
                                  current_samples: np.ndarray) -> Tuple[bool, np.ndarray, np.ndarray, List[bool]]:
@@ -239,24 +240,23 @@ class WassersteinSuccessBuffer(AbstractSuccessBuffer):
 
         if n_new > 0:
             remove_mask = self.returns < self.delta
-            if not np.any(remove_mask) and self.max_reuse * self.returns.shape[0] >= current_samples.shape[0]:
+            if not np.any(remove_mask) and self.returns.shape[0] >= self.max_size:
+                extended_contexts = np.concatenate((self.contexts, contexts[mask, :]), axis=0)
+                extended_returns = np.concatenate((self.returns, returns[mask]), axis=0)
+
                 # At this stage we use the optimizer
-                assignments = self.solver(self.contexts, contexts[mask], current_samples, self.last_assignments)
-                source_idxs, target_idxs = np.where(assignments)
+                dists = np.sum(np.square(extended_contexts[:, None, :] - current_samples[None, :, :]), axis=-1)
+                assignments = linear_sum_assignment(dists, maximize=False)
+                ret_idxs = assignments[0]
 
                 # Select the contexts using the solution from the MIP solver. The unique functions sorts the data
-                ret_idxs = np.unique(source_idxs)
-                new_contexts = np.concatenate((self.contexts, contexts[mask, :]), axis=0)[ret_idxs, :]
-                new_returns = np.concatenate((self.returns, returns[mask]), axis=0)[ret_idxs]
+                new_contexts = extended_contexts[ret_idxs, :]
+                new_returns = extended_returns[ret_idxs]
 
                 # We update the mask to indicate only the kept samples
-                mask[mask] = [idx in (source_idxs - self.contexts.shape[0]) for idx in np.arange(n_new)]
+                mask[mask] = [idx in (ret_idxs - self.contexts.shape[0]) for idx in np.arange(n_new)]
 
-                # We need to relabel the assignments
-                up_ret_idxs = np.select([source_idxs == idx for idx in ret_idxs], np.arange(ret_idxs.shape[0]).tolist(),
-                                        source_idxs)
-                self.last_assignments = (up_ret_idxs, target_idxs)
-                avg_dist = np.mean(np.linalg.norm(new_contexts[up_ret_idxs] - current_samples[target_idxs], axis=-1))
+                avg_dist = sliced_wasserstein(new_contexts, current_samples)
                 print("Updated success buffer with %d samples. New Wasserstein distance: %.3e" % (n_new, avg_dist))
             else:
                 # We replace the unsuccessful samples by the successful ones

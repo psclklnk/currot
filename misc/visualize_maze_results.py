@@ -6,6 +6,7 @@ from matplotlib import cm
 from misc.util import add_plot
 import matplotlib.pyplot as plt
 from deep_sprl.experiments import MazeExperiment
+from deep_sprl.environments.maze import MazeEnv
 
 plt.rc('text.latex', preamble=r'\usepackage{amsmath}'
                               r'\newcommand{\currot}{\textsc{currot}}'
@@ -151,7 +152,8 @@ def full_plot(path=None, base_log_dir="logs"):
     precision_comparison(ax2, base_log_dir=base_log_dir)
 
     f.legend(lines,
-             [r"\sprl", "Random", "Oracle", r"\currot \tiny{(Ours)}", r"\goalgan", r"\alpgmm", r"\acl", r"\plr", r"\vds"],
+             [r"\sprl", "Random", "Oracle", r"\currot \tiny{(Ours)}", r"\goalgan", r"\alpgmm", r"\acl", r"\plr",
+              r"\vds"],
              fontsize=FONT_SIZE, loc='upper left', bbox_to_anchor=(-0.01, 1.03), ncol=9, columnspacing=0.4,
              handlelength=0.9, handletextpad=0.25)
 
@@ -227,8 +229,12 @@ def wb_distribution_visualization(seed, iterations, path=None, base_log_dir="log
         teacher.load(os.path.join(seed_path, "iteration-%d" % iteration))
         samples = teacher.teacher.current_samples
         success_samples = teacher.success_buffer.contexts
-        print((np.percentile(success_samples[:, -1], 25), np.percentile(success_samples[:, -1], 50),
-               np.percentile(success_samples[:, -1], 75)))
+        mask = np.array([MazeEnv._is_feasible(success_samples[i, :2]) for i in range(success_samples.shape[0])])
+        if np.any(mask):
+            print("Tolerance at iteration %d: %.3f/%.3f/%.3f" % (iteration,
+                                                                 np.percentile(success_samples[mask, -1], 25),
+                                                                 np.percentile(success_samples[mask, -1], 50),
+                                                                 np.percentile(success_samples[mask, -1], 75)))
 
         # ax = plt.Axes(f, [0.4 * (i % 2) + 0.005, 0.5 * (1 - (i // 2)) + 0.005, 0.39, 0.49])
         ax = plt.Axes(f, [0.39 * (i % 2) + 0.005, 0.5 * (1 - (i // 2)) + 0.005, 0.38, 0.42])

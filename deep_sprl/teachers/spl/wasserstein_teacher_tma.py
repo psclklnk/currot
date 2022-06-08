@@ -1,7 +1,7 @@
 import copy
 import numpy as np
 from TeachMyAgent.teachers.algos.AbstractTeacher import AbstractTeacher
-from .wasserstein_teacher import ContinuousBarycenterCurriculum
+from .spl.wasserstein_teacher import ContinuousBarycenterCurriculum
 
 
 class TMAContinuousBarycenterCurriculum(AbstractTeacher):
@@ -27,7 +27,7 @@ class TMAContinuousBarycenterCurriculum(AbstractTeacher):
 
         self.curriculum = ContinuousBarycenterCurriculum((np.array(context_lb), np.array(context_ub)),
                                                          env_reward_lb, env_reward_ub, init_samples, target_sampler,
-                                                         perf_lb, eta, episodes_per_update, wb_max_reuse=1)
+                                                         perf_lb, eta, wait_until_threshold=False)
 
         self.context_buffer = []
         self.return_buffer = []
@@ -50,13 +50,11 @@ class TMAContinuousBarycenterCurriculum(AbstractTeacher):
             self.return_buffer.clear()
             self.curriculum.update_distribution(contexts, returns)
             new_snapshot["current_samples"] = copy.deepcopy(self.curriculum.teacher.current_samples)
-            new_snapshot["value_fn_state"] = self.curriculum.model.model.state_dict()
             new_snapshot["success_buffer"] = copy.deepcopy(self.curriculum.success_buffer.contexts)
-            new_snapshot["alp_sampler"] = copy.deepcopy(self.curriculum.sampler)
             self.bk["teacher_snapshots"].append(new_snapshot)
 
     def sample_task(self):
-        return self.curriculum.sample()
+        return self.curriculum.sample().astype(np.float32)
 
     def is_non_exploratory_task_sampling_available(self):
         return True

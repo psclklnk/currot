@@ -17,7 +17,7 @@ def main():
     parser.add_argument("--project_dir", type=str, required=True)
     parser.add_argument("--base_log_dir", type=str, default="logs")
     parser.add_argument("--type", type=str, default="alp_gmm", choices=["alp_gmm", "goal_gan", "acl", "plr", "vds"])
-    parser.add_argument("--learner", type=str, default="ppo", choices=["ppo", "sac", "racing_ppo"])
+    parser.add_argument("--learner", type=str, default="ppo", choices=["ppo", "sac"])
     parser.add_argument("--env", type=str, default="point_mass_2d", choices=["point_mass_2d", "maze"])
     parser.add_argument("--n_seeds", default=1, type=int)
     parser.add_argument("--n_cores", default=1, type=int)

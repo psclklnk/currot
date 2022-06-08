@@ -84,7 +84,10 @@ class MazeExperiment(AbstractExperiment):
         return np.where(cs[:, -1] < 0.06, np.log(1 / norm) * np.ones(cs.shape[0]),
                         np.log(1e-4 / norm) * np.ones(cs.shape[0]))
 
-    def target_sampler(self, n, rng=None):
+    def target_sampler(self, n=None, rng=None):
+        if n is None:
+            n = self.EP_PER_UPDATE
+
         if rng is None:
             rng = np.random
         return rng.uniform(self.TARGET_LOWER_CONTEXT_BOUNDS, self.TARGET_UPPER_CONTEXT_BOUNDS, size=(n, 3))
@@ -178,7 +181,7 @@ class MazeExperiment(AbstractExperiment):
         elif self.curriculum.wasserstein():
             init_samples = np.random.uniform(np.array([-9., -9., 18.]), np.array([9., 9., 18.]), size=(500, 3))
             return ContinuousBarycenterCurriculum(bounds, self.MIN_RET, self.MAX_RET, init_samples, self.target_sampler,
-                                                  self.DELTA, self.METRIC_EPS, self.EP_PER_UPDATE, wb_max_reuse=1,
+                                                  self.DELTA, self.METRIC_EPS,
                                                   return_transform=lambda x: x - self.MIN_RET)
         else:
             raise RuntimeError('Invalid self-paced curriculum type')

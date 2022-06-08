@@ -39,15 +39,21 @@ class PointMass2DExperiment(AbstractExperiment):
         # There is another factor of 0.5 since exactly half of the distribution is out of bounds
         return np.log(0.5 * 0.5 * (np.exp(p0 - pmax) + np.exp(p1 - pmax))) + pmax
 
-    def target_sampler(self, n, rng=None):
+    def target_sampler(self, n=None, rng=None):
+        if n is None:
+            n = self.EP_PER_UPDATE
+
         if rng is None:
             rng = np.random
 
-        decisions = rng.randint(0, 2, size=n)
-        s0 = rng.multivariate_normal(self.TARGET_MEANS[0], self.TARGET_VARIANCES[0], size=n)
-        s1 = rng.multivariate_normal(self.TARGET_MEANS[1], self.TARGET_VARIANCES[1], size=n)
+        if n % 2 == 0:
+            s0 = rng.multivariate_normal(self.TARGET_MEANS[0], self.TARGET_VARIANCES[0], size=n // 2)
+            s1 = rng.multivariate_normal(self.TARGET_MEANS[1], self.TARGET_VARIANCES[1], size=n // 2)
+        else:
+            s0 = rng.multivariate_normal(self.TARGET_MEANS[0], self.TARGET_VARIANCES[0], size=(n - 1) // 2)
+            s1 = rng.multivariate_normal(self.TARGET_MEANS[1], self.TARGET_VARIANCES[1], size=(n + 1) // 2)
 
-        return decisions[:, None] * s0 + (1 - decisions)[:, None] * s1
+        return np.concatenate((s0, s1), axis=0)
 
     INITIAL_MEAN = np.array([0., 4.25])
     INITIAL_VARIANCE = np.diag(np.square([2, 1.875]))
@@ -57,7 +63,7 @@ class PointMass2DExperiment(AbstractExperiment):
     KL_EPS = 0.25
     DELTA = 4.0
     METRIC_EPS = 0.5
-    EP_PER_UPDATE = 40
+    EP_PER_UPDATE = 20
 
     STEPS_PER_ITER = 4096
     DISCOUNT_FACTOR = 0.95
@@ -168,9 +174,9 @@ class PointMass2DExperiment(AbstractExperiment):
                                       self.INITIAL_VARIANCE.copy(), bounds, self.DELTA, max_kl=self.KL_EPS,
                                       std_lower_bound=self.STD_LOWER_BOUND.copy(), kl_threshold=self.KL_THRESHOLD)
         else:
-            init_samples = np.random.uniform(self.LOWER_CONTEXT_BOUNDS, self.UPPER_CONTEXT_BOUNDS, size=(200, 2))
+            init_samples = np.random.uniform(self.LOWER_CONTEXT_BOUNDS, self.UPPER_CONTEXT_BOUNDS, size=(100, 2))
             return ContinuousBarycenterCurriculum(bounds, self.MIN_RET, self.MAX_RET, init_samples, self.target_sampler,
-                                                  self.DELTA, self.METRIC_EPS, self.EP_PER_UPDATE)
+                                                  self.DELTA, self.METRIC_EPS, wait_until_threshold=True)
 
     def get_env_name(self):
         return "point_mass_2d"

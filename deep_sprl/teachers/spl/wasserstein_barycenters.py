@@ -1,140 +1,117 @@
 import os
-import torch
 import pickle
 import numpy as np
-import cyipopt as ipopt
-from geomloss import SamplesLoss
+from scipy.optimize import linear_sum_assignment
+from deep_sprl.teachers.spl.sliced_wasserstein import sliced_wasserstein
 
 
-class IndividualBarycenterCurriculum:
+class RandomizedIndividualBarycenterCurriculum:
 
-    def __init__(self, init_samples, target_sampler, perf_lb, eta, callback=None, opt_tol=1e-3, opt_time=2.,
-                 ws_scaling=0.9, ws_blur=0.01):
+    def __init__(self, init_samples, target_sampler, perf_lb, eta, bounds, callback=None):
         self.current_samples = init_samples
         self.n_samples, self.dim = self.current_samples.shape
         self.target_sampler = target_sampler
-
+        self.bounds = bounds
         self.perf_lb = perf_lb
         self.eta = eta
-
-        self.sl = SamplesLoss("sinkhorn", blur=ws_blur, scaling=ws_scaling, backend="tensorized")
         self.callback = callback
 
-        self.target_plan = None
-        self.model = None
-        self.opt_mask = None
+    def sample_ball(self, targets, samples=None, half_ball=None, n=100):
+        if samples is None:
+            samples = self.current_samples
 
-        lb = [0.] * self.n_samples
-        ub = [1.] * self.n_samples
+        # Taken from http://extremelearning.com.au/how-to-generate-uniformly-random-points-on-n-spheres-and-n-balls/
+        # Method 20
+        direction = np.random.normal(0, 1, (n, self.dim))
+        norm = np.linalg.norm(direction, axis=-1, keepdims=True)
+        r = np.power(np.random.uniform(size=(n, 1)), 1. / self.dim)
 
-        cl = [-np.inf] + [perf_lb] * self.n_samples
-        cu = [eta] + [np.inf] * self.n_samples
-        self.nlp = ipopt.Problem(n=self.n_samples, m=len(cl), problem_obj=self, lb=lb, ub=ub, cl=cl, cu=cu)
+        # We only consider samples that decrease the distance objective (i.e. are aligned with the direction)
+        noise = r * (direction / norm)
+        dirs = targets - samples
+        dir_norms = np.einsum("ij,ij->i", dirs, dirs)
+        noise_projections = np.einsum("ij,kj->ik", dirs / dir_norms[:, None], noise)
 
-        # ... and configure some options of it (e.g. that we do not need to be so perfectly accurate,
-        # after all it is RL)
-        self.nlp.add_option('mu_strategy', 'adaptive')
-        self.nlp.add_option('hessian_approximation', 'limited-memory')
-        self.nlp.add_option('print_level', 0)
-        self.nlp.add_option('max_cpu_time', opt_time)
-        self.nlp.add_option('tol', opt_tol)
+        projected_noise = np.where((noise_projections > 0)[..., None], noise[None, ...],
+                                   noise[None, ...] - 2 * noise_projections[..., None] * dirs[:, None, :])
+        if half_ball is not None:
+            projected_noise[~half_ball] = noise
 
-    def wasserstein_distance(self, initial_samples, target_samples, for_backprop=False):
-        x = torch.from_numpy(initial_samples).requires_grad_(True)
-        alpha = torch.ones(x.shape[0], dtype=x.dtype) / x.shape[0]
-        y = torch.from_numpy(target_samples)
-        beta = torch.ones(y.shape[0], dtype=y.dtype) / y.shape[0]
-
-        if for_backprop:
-            return self.sl(alpha, x, beta, y), x
-        else:
-            return self.sl(alpha, x, beta, y).detach().numpy()
-
-    def compute_transport_plan(self, initial_samples, target_samples):
-        wdist, x = self.wasserstein_distance(initial_samples, target_samples, for_backprop=True)
-
-        g, = torch.autograd.grad(wdist, [x])
-        return -(g * x.shape[0]).detach().numpy()
+        scales = np.minimum(self.eta, np.sqrt(dir_norms))[:, None, None]
+        return np.squeeze(np.clip(samples[..., None, :] + scales * projected_noise, self.bounds[0], self.bounds[1]))
 
     @staticmethod
-    def _distance(target_plan, x, grad=False):
-        x = np.clip(x, 0., 1.)
-        dist = x[:, None] * target_plan
-        squared_dists = np.sum(np.square(dist), axis=-1)
+    def visualize_particles(init_samples, particles, performances):
+        if particles.shape[-1] != 2:
+            raise RuntimeError("Can only visualize 2D data")
 
-        if grad:
-            return np.einsum("ij,ij->i", dist, target_plan) / squared_dists.shape[0]
-        else:
-            return 0.5 * np.mean(squared_dists)
+        import matplotlib.pyplot as plt
+        f = plt.figure()
+        ax = f.gca()
+        scat = ax.scatter(particles[0, :, 0], particles[0, :, 1], c=performances[0, :])
+        ax.scatter(init_samples[0, 0], init_samples[0, 1], marker="x", c="red")
+        plt.colorbar(scat)
+        plt.show()
 
-    @staticmethod
-    def _particle_performance(initial_samples, target_plan, model, x, grad=False):
-        x = np.clip(x, 0., 1.)
-        moved_samples = initial_samples + x[:, None] * target_plan
-        if grad:
-            # Preds [N], Grads [N, D]
-            pers, perf_grads = model.predict_individual(moved_samples, with_gradient=True)
-            return np.einsum("ij,ij->i", perf_grads, target_plan)
-        else:
-            return model.predict_individual(moved_samples, with_gradient=False)
+    def ensure_successful_initial(self, model, init_samples, success_samples):
+        performance_reached = model.predict_individual(init_samples) >= self.perf_lb
+        replacement_mask = ~performance_reached
+        n_replacements = np.sum(replacement_mask)
+        if n_replacements > 0:
+            valid_successes = model.predict_individual(success_samples) >= self.perf_lb
+            n_valid = np.sum(valid_successes)
+            if n_valid >= n_replacements:
+                # In this case we only allow selection from the valid samples
+                success_samples = success_samples[valid_successes, :]
+                valid_successes = np.ones(success_samples.shape[0], dtype=np.bool)
 
-    def objective(self, x):
-        x = np.clip(x, 0., 1.)
-        dist = (1 - x[:, None]) * self.target_plan
-        squared_dists = np.where(self.opt_mask, np.sum(np.square(dist), axis=-1), 0.)
-        return 0.5 * np.mean(squared_dists)
+            dists = np.sum(np.square(success_samples[None, :, :] - init_samples[replacement_mask, None, :]), axis=-1)
+            success_assignment = linear_sum_assignment(dists, maximize=False)
+            init_samples[replacement_mask, :] = success_samples[success_assignment[1], :]
+            performance_reached[replacement_mask] = valid_successes[success_assignment[1]]
 
-    def gradient(self, x):
-        x = np.clip(x, 0., 1.)
-        dist = (1 - x[:, None]) * self.target_plan
-        return np.where(self.opt_mask, -np.einsum("ij,ij->i", dist, self.target_plan) / dist.shape[0], 0.)
+        return init_samples, performance_reached
 
-    def constraints(self, x):
-        c1 = self._distance(self.target_plan, x, grad=False)
-        c2 = self._particle_performance(self.current_samples, self.target_plan, self.model, x, grad=False)
-        c2 = np.where(self.opt_mask, c2, self.perf_lb)
-        return np.concatenate([[c1], c2])
-
-    def jacobian(self, x):
-        j1 = self._distance(self.target_plan, x, grad=True)
-        j2 = self._particle_performance(self.current_samples, self.target_plan, self.model, x,
-                                        grad=True)
-        j2 = np.where(self.opt_mask, j2, 0.)
-        return np.concatenate((j1[None, :], np.diag(j2)), axis=0)
-
-    def update_distribution(self, model, success_samples):
-        # We reset the current samples to the success samples, if they are below the performance threshold
-        init_samples = self.current_samples.copy()
-        low_perfs = model.predict_individual(init_samples) < self.perf_lb
-        if np.any(low_perfs):
-            value_plan = self.compute_transport_plan(init_samples, success_samples)
-            init_samples[low_perfs, :] = init_samples[low_perfs, :] + value_plan[low_perfs, :]
+    def update_distribution(self, model, success_samples, debug=False):
+        init_samples, performance_reached = self.ensure_successful_initial(model, self.current_samples.copy(),
+                                                                           success_samples)
         target_samples = self.target_sampler(self.n_samples)
+        if debug:
+            target_samples_true = target_samples.copy()
+        movements = sliced_wasserstein(init_samples, target_samples, grad=True)[1]
+        target_samples = init_samples + movements
+        particles = self.sample_ball(target_samples, samples=init_samples, half_ball=performance_reached)
 
-        # Now we optimize the distance to the target while trying to fulfill the
-        opt_mask = model.predict_individual(init_samples) > self.perf_lb
-        if np.sum(opt_mask) == 0:
-            print("Skipping optimization as no particle is above the performance constraint")
-            new_samples = init_samples
-        else:
-            self.opt_mask = opt_mask
-            self.model = model
-            self.target_plan = self.compute_transport_plan(init_samples, target_samples)
+        distances = np.linalg.norm(particles - target_samples[:, None, :], axis=-1)
+        performances = model.predict_individual(particles)
+        if debug:
+            self.visualize_particles(init_samples, particles, performances)
 
-            # Do a fine-tuning by optimizing the coefficients with IPOPT (should take close to no time)
-            import time
-            t1 = time.time()
-            x, info = self.nlp.solve(np.zeros(self.n_samples))
-            t2 = time.time()
-            x = np.clip(x, 0., 1.)
-            new_samples = init_samples + x[:, None] * self.target_plan
-            print("Optimization took: %.3e s" % (t2 - t1))
+        mask = performances > self.perf_lb
+        solution_possible = np.any(mask, axis=-1)
+        distances[~mask] = np.inf
+        opt_idxs = np.where(solution_possible, np.argmin(distances, axis=-1), np.argmax(performances, axis=-1))
+        new_samples = particles[np.arange(0, self.n_samples), opt_idxs]
 
-        print("Optimized performance: %.3e" % model(new_samples))
-        print("Optimized target distance: %.3e" % self.wasserstein_distance(new_samples, target_samples))
+        if debug:
+            vis_idxs = np.random.randint(0, target_samples.shape[0], size=50)
+            import matplotlib.pyplot as plt
+            xs, ys = np.meshgrid(np.linspace(0, 9, num=150), np.linspace(0, 6, num=100))
+            zs = model.predict_individual(np.stack((xs, ys), axis=-1))
+            ims = plt.imshow(zs, extent=[0, 9, 0, 6], origin="lower")
+            plt.contour(xs, ys, zs, [180])
+            plt.colorbar(ims)
+
+            plt.scatter(target_samples_true[vis_idxs, 0], target_samples_true[vis_idxs, 1], marker="x", color="red")
+            plt.scatter(self.current_samples[vis_idxs, 0], self.current_samples[vis_idxs, 1], marker="o", color="C0")
+            plt.scatter(init_samples[vis_idxs, 0], init_samples[vis_idxs, 1], marker="o", color="C2")
+            plt.scatter(new_samples[vis_idxs, 0], new_samples[vis_idxs, 1], marker="o", color="C1")
+            plt.xlim([0, 9])
+            plt.ylim([0, 6])
+            plt.show()
 
         if self.callback is not None:
-            self.callback(init_samples, new_samples, success_samples, target_samples)
+            self.callback(self.current_samples, new_samples, success_samples, target_samples)
 
         self.current_samples = new_samples
 
