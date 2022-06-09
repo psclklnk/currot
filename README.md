@@ -21,8 +21,11 @@ of local optima in the estimated value function.
 
 As shown, in the plots below, the method in the main branch performs better or similar to the ICML version. We did not re-compute the experiments for the TeachMyAgent benchmark, as it is quite compute intensive.
 
-![point-mass-performance](https://github.com/psclklnk/currot/blob/main/point_mass_performance.png?raw=true "Point Mass")
-![maze-performance](https://github.com/psclklnk/currot/blob/main/maze_performance.png?raw=true "Maze")
+Point-Mass Environment:\
+![point-mass-performance](point_mass_performance.png "Point Mass") \
+
+Maze Environment\
+![maze-performance](maze_performance.png "Maze")
 
 
 For the sparse goal reaching and point mass environment, we used Python 3.8 to run the experiments. The required dependencies are listed in the **requirements.txt**
