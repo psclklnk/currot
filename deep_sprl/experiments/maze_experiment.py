@@ -45,7 +45,7 @@ class MazeExperiment(AbstractExperiment):
 
     DISCOUNT_FACTOR = 0.995
 
-    DELTA = 0.6
+    DELTA = 0.8
     METRIC_EPS = 1.5
     KL_EPS = 0.25
     EP_PER_UPDATE = 50
