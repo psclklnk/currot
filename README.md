@@ -22,6 +22,12 @@ of local optima in the estimated value function.
 As shown, in the plots below, the method in the main branch performs better on the point-mass and the maze environment. We did not re-compute the experiments for the TeachMyAgent benchmark, as it is quite compute intensive.
 
 ![point-mass-performance](https://github.com/psclklnk/currot/blob/main/point_mass_performance.pdf?raw=true)
+<object data="https://github.com/psclklnk/currot/blob/main/point_mass_performance.pdf?raw=true" type="application/pdf" width="700px" height="700px">
+    <embed src="https://github.com/psclklnk/currot/blob/main/point_mass_performance.pdf?raw=true">
+        <p>This browser does not support PDFs. Please download the PDF to view it: <a href="https://github.com/psclklnk/currot/blob/main/point_mass_performance.pdf?raw=true">Download PDF</a>.</p>
+    </embed>
+</object>
+
 
 For the sparse goal reaching and point mass environment, we used Python 3.8 to run the experiments. The required dependencies are listed in the **requirements.txt**
 file and can be installed via
